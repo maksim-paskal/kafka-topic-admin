@@ -46,7 +46,7 @@ func main() { //nolint:funlen,cyclop
 	}
 
 	if len(*topics) == 0 {
-		log.Fatal("specify topic name, use -topic=topicName")
+		log.Fatal("specify topic name, use -topics=topicName")
 	}
 
 	configMap := kafka.ConfigMap{}
@@ -91,10 +91,7 @@ func main() { //nolint:funlen,cyclop
 
 		results, err = a.CreateTopics(
 			ctx,
-			// Multiple topics can be created simultaneously
-			// by providing more TopicSpecification structs here.
 			createTopics,
-			// Admin options
 			kafka.SetAdminOperationTimeout(*maxDur))
 	case "delete":
 		results, err = a.DeleteTopics(
