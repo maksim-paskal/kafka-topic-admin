@@ -29,4 +29,4 @@ RUN addgroup -g 101 -S app \
 
 USER 101
 
-CMD /app/kafka-topic-creation
+ENTRYPOINT [ "/app/kafka-topic-creation" ]
