@@ -1,3 +1,6 @@
+include .env
+export $(shell sed 's/=.*//' .env)
+
 test:
 	./scripts/validate-license.sh
 	go fmt ./cmd/...
@@ -5,7 +8,7 @@ test:
 	go mod tidy
 	golangci-lint run -v
 run:
-	go run --race ./cmd $(args)
+	go run --race ./cmd -log.level=DEBUG $(args)
 build:
 	docker build . -t paskalmaksim/kafka-topic-admin:dev
 push:

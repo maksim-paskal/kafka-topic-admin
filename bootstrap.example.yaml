@@ -1,5 +1,0 @@
-bootstrap.servers: broker:9092
-security.protocol: SASL_SSL
-sasl.mechanisms: PLAIN
-sasl.username: username
-sasl.password: password

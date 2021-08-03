@@ -15,23 +15,27 @@ package main
 import (
 	"context"
 	"flag"
-	"io/ioutil"
+	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	log "github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v3"
 )
 
 const (
 	defaultMaxDuration = 60 * time.Second
+	envPrefix          = "KAFKA_"
+	modeCreate         = "create"
+	modeDelete         = "delete"
+	modeListTopics     = "list-topics"
 )
 
 //nolint: gochecknoglobals
 var (
-	mode              = flag.String("mode", "create", "create or delete")
-	bootstrap         = flag.String("bootstrap", "bootstrap.yaml", "config yaml")
+	mode              = flag.String("mode", modeCreate, fmt.Sprintf("%s,%s,%s", modeCreate, modeDelete, modeListTopics))
+	logLevel          = flag.String("log.level", "INFO", "log level")
 	topics            = flag.String("topics", "", "topics name, separor comma")
 	maxDur            = flag.Duration("duration", defaultMaxDuration, "wait for the operation to finish")
 	numParts          = flag.Int("create.partition-count", -1, "partition count")
@@ -41,35 +45,61 @@ var (
 func main() { //nolint:funlen,cyclop
 	flag.Parse()
 
-	if *mode != "create" && *mode != "delete" {
-		log.Fatal("unknown node, use -mode=create or -mode=delete")
+	if *mode != modeCreate && *mode != modeDelete && *mode != modeListTopics {
+		log.Fatalf("unknown mode, use -mode=%s or -mode=%s or -mode=%s",
+			modeCreate,
+			modeDelete,
+			modeListTopics,
+		)
 	}
 
-	if len(*topics) == 0 {
+	if (*mode == modeCreate || *mode == modeDelete) && len(*topics) == 0 {
 		log.Fatal("specify topic name, use -topics=topicName")
+	}
+
+	logLevelParsed, err := log.ParseLevel(*logLevel)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.SetLevel(logLevelParsed)
+
+	if log.GetLevel() >= log.DebugLevel {
+		log.SetReportCaller(true)
 	}
 
 	configMap := kafka.ConfigMap{}
 
-	config, err := ioutil.ReadFile(*bootstrap)
-	if err != nil {
-		log.Fatalf("Failed to load config: %s\n", err)
+	for _, env := range os.Environ() {
+		envName := strings.Split(env, "=")[0]
+		name := strings.ToUpper(envName)
+
+		if strings.HasPrefix(name, envPrefix) {
+			// remove prefix
+			name = strings.TrimPrefix(name, envPrefix)
+			// make lovercase
+			name = strings.ToLower(name)
+			// replace _ with .
+			name = strings.ReplaceAll(name, "_", ".")
+
+			log.Debugf("env=%s,name=%s,value=%s", env, name, os.Getenv(envName))
+			configMap[name] = os.Getenv(envName)
+		}
 	}
 
-	err = yaml.Unmarshal(config, &configMap)
-	if err != nil {
-		log.Fatalf("Failed to load parse yaml: %s\n", err)
-	}
+	vnum, vstr := kafka.LibraryVersion()
+	log.Debugf("LibraryVersion: %s (0x%x)\n", vstr, vnum)
+	log.Debugf("LinkInfo:       %s\n", kafka.LibrdkafkaLinkInfo)
 
 	// Create a new AdminClient.
 	// AdminClient can also be instantiated using an existing
 	// Producer or Consumer instance, see NewAdminClientFromProducer and
 	// NewAdminClientFromConsumer.
-	a, err := kafka.NewAdminClient(&configMap)
+	adminClient, err := kafka.NewAdminClient(&configMap)
 	if err != nil {
 		log.Fatalf("Failed to create Admin client: %s\n", err)
 	}
-	defer a.Close()
+	defer adminClient.Close()
 
 	// Contexts are used to abort or limit the amount of time
 	// the Admin call blocks waiting for a result.
@@ -79,7 +109,7 @@ func main() { //nolint:funlen,cyclop
 	var results []kafka.TopicResult
 
 	switch *mode {
-	case "create":
+	case modeCreate:
 		createTopics := make([]kafka.TopicSpecification, 0)
 		for _, topic := range strings.Split(*topics, ",") {
 			createTopics = append(createTopics, kafka.TopicSpecification{ //nolint:exhaustivestruct
@@ -89,17 +119,27 @@ func main() { //nolint:funlen,cyclop
 			})
 		}
 
-		results, err = a.CreateTopics(
+		results, err = adminClient.CreateTopics(
 			ctx,
 			createTopics,
 			kafka.SetAdminOperationTimeout(*maxDur))
-	case "delete":
-		results, err = a.DeleteTopics(
+	case modeDelete:
+		results, err = adminClient.DeleteTopics(
 			ctx,
 			strings.Split(*topics, ","),
 			kafka.SetAdminOperationTimeout(*maxDur))
+	case modeListTopics:
+		meta, err := adminClient.GetMetadata(nil, true, int(maxDur.Milliseconds()))
+		if err != nil {
+			log.Fatal(err) //nolint: gocritic
+		}
+
+		for _, topic := range meta.Topics {
+			fmt.Printf("%s\n", topic.Topic) //nolint: forbidigo
+		}
+
 	default:
-		log.Fatal("unknown node") //nolint:gocritic
+		log.Fatalf("unknown mode %s", *mode)
 	}
 
 	if err != nil {
