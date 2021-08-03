@@ -37,3 +37,17 @@ docker run -it --rm \
   paskalmaksim/kafka-topic-admin:latest \
   -mode=list-topics
 ```
+
+# Metrics
+```
+docker run -it --rm \
+-p 9308:9308 \
+danielqsj/kafka-exporter:latest \
+--kafka.server=broker:9092 \
+--sasl.enabled \
+--sasl.mechanism="plain" \
+--sasl.username="username" \
+--sasl.password="password" \
+--tls.enabled \
+--tls.insecure-skip-tls-verify
+```
