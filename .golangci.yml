@@ -4,3 +4,6 @@ issues:
   fix: true
 linters:
   enable-all: true
+  disable:
+  - exhaustivestruct
+  - exhaustive
