@@ -39,7 +39,7 @@ var (
 	topics            = flag.String("topics", "", "topics name, separor comma")
 	maxDur            = flag.Duration("duration", defaultMaxDuration, "wait for the operation to finish")
 	numParts          = flag.Int("create.partition-count", -1, "partition count")
-	replicationFactor = flag.Int("create.replication-factor", -1, "replication factor")
+	replicationFactor = flag.Int("create.replication-factor", 1, "replication factor")
 )
 
 func main() { //nolint:funlen,cyclop
