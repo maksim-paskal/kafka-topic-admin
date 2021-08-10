@@ -8,7 +8,7 @@ test:
 	go mod tidy
 	golangci-lint run -v
 run:
-	go run --race ./cmd -log.level=DEBUG $(args)
+	go run --race ./cmd -log.level=DEBUG -topics-file=kafka-topics.yaml $(args)
 build:
 	docker build . -t paskalmaksim/kafka-topic-admin:dev
 push:

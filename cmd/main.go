@@ -16,12 +16,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	log "github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -37,13 +39,29 @@ var (
 	mode              = flag.String("mode", modeCreate, fmt.Sprintf("%s,%s,%s", modeCreate, modeDelete, modeListTopics))
 	logLevel          = flag.String("log.level", "INFO", "log level")
 	topics            = flag.String("topics", "", "topics name, separor comma")
+	topicFile         = flag.String("topics-file", "", "topics yaml")
 	maxDur            = flag.Duration("duration", defaultMaxDuration, "wait for the operation to finish")
 	numParts          = flag.Int("create.partition-count", -1, "partition count")
-	replicationFactor = flag.Int("create.replication-factor", 1, "replication factor")
+	replicationFactor = flag.Int("create.replication-factor", -1, "replication factor")
 )
 
-func main() { //nolint:funlen,cyclop
+type kafkaTopicsFile struct {
+	Topics []string `yaml:"topics"`
+}
+
+func main() { //nolint:funlen,cyclop,gocognit
 	flag.Parse()
+
+	logLevelParsed, err := log.ParseLevel(*logLevel)
+	if err != nil {
+		log.WithError(err).Fatal("can not parse level")
+	}
+
+	log.SetLevel(logLevelParsed)
+
+	if log.GetLevel() >= log.DebugLevel {
+		log.SetReportCaller(true)
+	}
 
 	if *mode != modeCreate && *mode != modeDelete && *mode != modeListTopics {
 		log.Fatalf("unknown mode, use -mode=%s or -mode=%s or -mode=%s",
@@ -53,20 +71,34 @@ func main() { //nolint:funlen,cyclop
 		)
 	}
 
-	if (*mode == modeCreate || *mode == modeDelete) && len(*topics) == 0 {
-		log.Fatal("specify topic name, use -topics=topicName")
+	// all topics
+	inputTopics := make([]string, 0)
+
+	if len(*topicFile) > 0 {
+		topicsBytes, err := ioutil.ReadFile(*topicFile)
+		if err != nil {
+			log.WithError(err).Fatalf("can not read yaml file")
+		}
+
+		topicsFile := kafkaTopicsFile{}
+
+		err = yaml.Unmarshal(topicsBytes, &topicsFile)
+		if err != nil {
+			log.WithError(err).Fatalf("can not parse yaml")
+		}
+
+		inputTopics = topicsFile.Topics
 	}
 
-	logLevelParsed, err := log.ParseLevel(*logLevel)
-	if err != nil {
-		log.Fatal(err)
+	if len(*topics) > 0 {
+		inputTopics = strings.Split(*topics, ",")
 	}
 
-	log.SetLevel(logLevelParsed)
-
-	if log.GetLevel() >= log.DebugLevel {
-		log.SetReportCaller(true)
+	if (*mode == modeCreate || *mode == modeDelete) && len(inputTopics) == 0 {
+		log.Fatal("specify topics name, use -topics=topicName or -topics-file=kafka-topics.yaml")
 	}
+
+	log.Debug(inputTopics)
 
 	configMap := kafka.ConfigMap{}
 
@@ -97,7 +129,7 @@ func main() { //nolint:funlen,cyclop
 	// NewAdminClientFromConsumer.
 	adminClient, err := kafka.NewAdminClient(&configMap)
 	if err != nil {
-		log.Fatalf("Failed to create Admin client: %s\n", err)
+		log.WithError(err).Fatal("Failed to create Admin client")
 	}
 	defer adminClient.Close()
 
@@ -111,12 +143,18 @@ func main() { //nolint:funlen,cyclop
 	switch *mode {
 	case modeCreate:
 		createTopics := make([]kafka.TopicSpecification, 0)
-		for _, topic := range strings.Split(*topics, ",") {
-			createTopics = append(createTopics, kafka.TopicSpecification{ //nolint:exhaustivestruct
-				Topic:             topic,
-				NumPartitions:     *numParts,
-				ReplicationFactor: *replicationFactor,
-			})
+
+		for _, topic := range inputTopics {
+			kafkaSpec := kafka.TopicSpecification{
+				Topic:         topic,
+				NumPartitions: *numParts,
+			}
+
+			if *replicationFactor > 0 {
+				kafkaSpec.ReplicationFactor = *replicationFactor
+			}
+
+			createTopics = append(createTopics, kafkaSpec)
 		}
 
 		results, err = adminClient.CreateTopics(
@@ -126,12 +164,12 @@ func main() { //nolint:funlen,cyclop
 	case modeDelete:
 		results, err = adminClient.DeleteTopics(
 			ctx,
-			strings.Split(*topics, ","),
+			inputTopics,
 			kafka.SetAdminOperationTimeout(*maxDur))
 	case modeListTopics:
 		meta, err := adminClient.GetMetadata(nil, true, int(maxDur.Milliseconds()))
 		if err != nil {
-			log.Fatal(err) //nolint: gocritic
+			log.WithError(err).Fatal("can not get metadata")
 		}
 
 		for _, topic := range meta.Topics {
@@ -139,14 +177,31 @@ func main() { //nolint:funlen,cyclop
 		}
 
 	default:
-		log.Fatalf("unknown mode %s", *mode)
+		log.Fatalf("unknown mode %s", *mode) //nolint:gocritic
 	}
 
 	if err != nil {
-		log.Fatalf("Failed to %s topic: %v\n", *mode, err)
+		log.WithError(err).Fatalf("Failed to %s topic", *mode)
 	}
 
+	isFatal := false //nolint:ifshort
+
 	for _, result := range results {
-		log.Infof("mode=%s, %s\n", *mode, result)
+		log := log.WithField("mode", *mode)
+
+		switch result.Error.Code() {
+		case kafka.ErrNoError:
+			log.Info(result)
+		case kafka.ErrTopicAlreadyExists:
+			log.Warn(result)
+		default:
+			isFatal = true
+
+			log.WithError(result.Error).Error(result)
+		}
+	}
+
+	if isFatal {
+		os.Exit(-1)
 	}
 }
