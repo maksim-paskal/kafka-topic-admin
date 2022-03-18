@@ -184,7 +184,7 @@ func main() { //nolint:funlen,cyclop,gocognit
 		log.WithError(err).Fatalf("Failed to %s topic", *mode)
 	}
 
-	isFatal := false //nolint:ifshort
+	isFatal := false
 
 	for _, result := range results {
 		log := log.WithField("mode", *mode)

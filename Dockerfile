@@ -18,13 +18,14 @@ RUN apk add --no-cache gcc musl-dev \
 
 RUN /usr/src/kafka-topic-creation/kafka-topic-creation -h
 
-FROM alpine:3.14
+FROM alpine:latest
 
 COPY --from=build /usr/src/kafka-topic-creation/kafka-topic-creation /app/kafka-topic-creation
 
 WORKDIR /app
 
-RUN addgroup -g 101 -S app \
+RUN apk upgrade \
+&& addgroup -g 101 -S app \
 && adduser -u 101 -D -S -G app app
 
 USER 101
